@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AI Agent Virtual Office</title>
+<link rel="stylesheet" href="./styles.css">
+<script type="importmap">
+{
+  "imports": {
+    "three": "./vendor/three.module.js"
+  }
+}
+</script>
+</head>
+<body>
+  <header id="topbar">
+    <div class="brand">
+      <span class="brand-mark">▦</span>
+      <span class="brand-name">AI Agent Virtual Office</span>
+    </div>
+    <nav class="tabs">
+      <button class="tab active" data-tab="overview">Overview</button>
+      <button class="tab" data-tab="walk">Walk In</button>
+      <button class="tab" data-tab="lounge">Lounge</button>
+    </nav>
+    <div class="clock" id="clock">--:--:--</div>
+  </header>
+
+  <div id="stage">
+    <div id="scene-container"></div>
+
+    <!-- LEFT PANEL : stats + agent activity -->
+    <aside id="left-panel" class="panel">
+      <div class="panel-title">OFFICE STATUS</div>
+      <div class="stat-row">
+        <span class="stat-label">ACTIVE AGENTS</span>
+        <span class="stat-value" id="stat-active">0/15</span>
+      </div>
+      <div class="stat-row">
+        <span class="stat-label">RUNNING TASKS</span>
+        <span class="stat-value" id="stat-running">0</span>
+      </div>
+      <div class="stat-row">
+        <span class="stat-label">COMPLETED TASKS</span>
+        <span class="stat-value" id="stat-completed">0</span>
+      </div>
+      <div class="stat-row">
+        <span class="stat-label">PROJECT PROGRESS</span>
+        <span class="stat-value" id="stat-progress">0%</span>
+      </div>
+      <div class="progress-track"><div class="progress-fill" id="progress-fill"></div></div>
+      <div class="project-name" id="stat-project">No project yet</div>
+
+      <div class="panel-title activity-title">AGENT ACTIVITY</div>
+      <ul id="activity-list"></ul>
+    </aside>
+
+    <!-- RIGHT PANEL : event log -->
+    <aside id="right-panel" class="panel">
+      <div class="panel-title">EVENT LOG</div>
+      <ul id="event-log"></ul>
+    </aside>
+
+    <!-- Walk-in interaction prompt -->
+    <div id="prompt" class="hidden"></div>
+
+    <!-- Walk-in hint bar -->
+    <div id="walk-hint" class="hidden">
+      <b>WASD</b> move &nbsp;·&nbsp; <b>Mouse</b> look (click scene to capture) &nbsp;·&nbsp; <b>E</b> talk &nbsp;·&nbsp; <b>Esc</b> release mouse / close chat
+    </div>
+    <div id="crosshair" class="hidden"></div>
+
+    <!-- Chat panel -->
+    <section id="chat-panel" class="hidden">
+      <div class="chat-header">
+        <span id="chat-title">Olivia · Idle</span>
+        <button id="chat-close" title="Close">✕</button>
+      </div>
+      <div id="chat-messages"></div>
+      <div class="chat-input-row">
+        <input id="chat-input" type="text" placeholder="Message Olivia…" autocomplete="off">
+        <button id="chat-send">Send</button>
+      </div>
+    </section>
+  </div>
+
+<script type="module" src="./js/main.js"></script>
+</body>
+</html>
