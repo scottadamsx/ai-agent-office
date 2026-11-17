@@ -52,6 +52,18 @@
       <div class="progress-track"><div class="progress-fill" id="progress-fill"></div></div>
       <div class="project-name" id="stat-project">No project yet</div>
 
+      <div class="panel-title model-title">LOCAL MODEL</div>
+      <div class="model-row">
+        <span class="model-dot checking" id="model-dot"></span>
+        <span class="model-status" id="model-status">Checking…</span>
+        <span class="model-name" id="model-name">qwen3:8b</span>
+      </div>
+      <div class="model-edit-row">
+        <input id="model-input" type="text" value="qwen3:8b" spellcheck="false"
+               autocomplete="off" title="Ollama model tag">
+        <button id="model-set">Set</button>
+      </div>
+
       <div class="panel-title activity-title">AGENT ACTIVITY</div>
       <ul id="activity-list"></ul>
     </aside>
@@ -77,6 +89,7 @@
         <span id="chat-title">Olivia · Idle</span>
         <button id="chat-close" title="Close">✕</button>
       </div>
+      <div id="chat-note" class="hidden"></div>
       <div id="chat-messages"></div>
       <div class="chat-input-row">
         <input id="chat-input" type="text" placeholder="Message Olivia…" autocomplete="off">

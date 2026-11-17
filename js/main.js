@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { buildOffice } from './office.js';
 import { Agent, AGENT_CONFIGS, GREETINGS, REPLIES, addBackgroundPeople, updateBackground } from './agents.js';
+import { getModelName, setModelName, checkModel, chatWithModel } from './model.js';
 
 // ---------------------------------------------------------------- renderer
 const container = document.getElementById('scene-container');
@@ -230,11 +231,58 @@ function updatePlayer(dt) {
   camera.lookAt(look);
 }
 
+// ---------------------------------------------------------------- local model (Ollama)
+let modelState = 'checking'; // 'ready' | 'not-pulled' | 'offline' | 'checking'
+const MODEL_STATUS_TEXT = { ready: 'Connected', 'not-pulled': 'Not pulled', offline: 'Offline', checking: 'Checking…' };
+
+function updateChatNote() {
+  const note = $('chat-note');
+  if (!note) return;
+  if (modelState === 'ready' || modelState === 'checking') {
+    note.classList.add('hidden');
+    note.textContent = '';
+  } else if (modelState === 'not-pulled') {
+    note.textContent = `Offline scripted mode: ${getModelName()} is not pulled in Ollama, so ${chatAgent ? chatAgent.name : 'the agent'} is using scripted replies. Pull it with: ollama pull ${getModelName()}`;
+    note.classList.remove('hidden');
+  } else {
+    note.textContent = `Offline scripted mode: Ollama is not reachable at localhost:11434, so ${chatAgent ? chatAgent.name : 'the agent'} is using scripted replies.`;
+    note.classList.remove('hidden');
+  }
+}
+
+async function refreshModelStatus() {
+  const { state } = await checkModel();
+  modelState = state;
+  const name = getModelName();
+  $('model-name').textContent = name;
+  $('model-status').textContent = MODEL_STATUS_TEXT[state] || state;
+  const dot = $('model-dot');
+  dot.className = 'model-dot ' + state;
+  updateChatNote();
+  return state;
+}
+$('model-input').value = getModelName();
+$('model-name').textContent = getModelName();
+function applyModelInput() {
+  setModelName($('model-input').value);
+  $('model-input').value = getModelName();
+  $('model-name').textContent = getModelName();
+  modelState = 'checking';
+  $('model-status').textContent = MODEL_STATUS_TEXT.checking;
+  $('model-dot').className = 'model-dot checking';
+  refreshModelStatus();
+}
+$('model-set').addEventListener('click', applyModelInput);
+$('model-input').addEventListener('keydown', e => { if (e.key === 'Enter') applyModelInput(); });
+refreshModelStatus();
+setInterval(refreshModelStatus, 15000);
+
 // ---------------------------------------------------------------- chat
 let chatAgent = null;
 let nearestAgent = null;
 const replyIdx = {};
 const chatLogged = new Set();
+const chatHistory = {}; // agent name -> [{role, content}] for the local model
 
 function chatMsg(text, who) {
   const d = document.createElement('div');
@@ -242,6 +290,7 @@ function chatMsg(text, who) {
   d.textContent = text;
   $('chat-messages').appendChild(d);
   $('chat-messages').scrollTop = $('chat-messages').scrollHeight;
+  return d;
 }
 function openChat(agent) {
   chatAgent = agent;
@@ -255,6 +304,7 @@ function openChat(agent) {
   $('prompt').classList.add('hidden');
   if (document.pointerLockElement) document.exitPointerLock();
   chatMsg(GREETINGS[agent.name], 'them');
+  refreshModelStatus(); // recheck Ollama every time a chat opens
   setTimeout(() => $('chat-input').focus(), 60);
 }
 function closeChat() {
@@ -264,7 +314,16 @@ function closeChat() {
   chatAgent = null;
   $('chat-panel').classList.add('hidden');
 }
-function sendChat() {
+function scriptedReply(agent, hist) {
+  const idx = (replyIdx[agent.name] = (replyIdx[agent.name] || 0) + 1);
+  const line = REPLIES[agent.name][(idx - 1) % REPLIES[agent.name].length];
+  setTimeout(() => {
+    hist.push({ role: 'assistant', content: line });
+    if (chatAgent === agent) chatMsg(line, 'them');
+  }, 750);
+}
+
+async function sendChat() {
   const input = $('chat-input');
   const text = input.value.trim();
   if (!text || !chatAgent) return;
@@ -272,10 +331,24 @@ function sendChat() {
   input.value = '';
   const agent = chatAgent;
   if (!chatLogged.has(agent.name)) { addLog(`Chatting with ${agent.name}.`); chatLogged.add(agent.name); }
-  const idx = (replyIdx[agent.name] = (replyIdx[agent.name] || 0) + 1);
-  setTimeout(() => {
-    if (chatAgent === agent) chatMsg(REPLIES[agent.name][(idx - 1) % REPLIES[agent.name].length], 'them');
-  }, 750);
+  const hist = (chatHistory[agent.name] = chatHistory[agent.name] || []);
+  hist.push({ role: 'user', content: text });
+
+  if (modelState !== 'ready') { scriptedReply(agent, hist); return; }
+
+  const typing = chatMsg(`${agent.name} is typing`, 'them typing');
+  try {
+    const reply = await chatWithModel(agent, hist);
+    typing.remove();
+    hist.push({ role: 'assistant', content: reply });
+    if (chatAgent === agent) chatMsg(reply, 'them');
+  } catch (err) {
+    // Ollama went away mid-chat: fall back to scripted replies, honestly.
+    typing.remove();
+    console.warn('Local model chat failed, using scripted reply:', err);
+    refreshModelStatus();
+    scriptedReply(agent, hist);
+  }
 }
 $('chat-send').addEventListener('click', sendChat);
 $('chat-input').addEventListener('keydown', e => { if (e.key === 'Enter') sendChat(); });
@@ -323,7 +396,8 @@ function tick() {
 tick();
 
 // small handle for automated QA / debugging
-window.__app = { agents, player, setMode, openChat, scene };
+window.__app = { agents, player, setMode, openChat, scene,
+  model: { state: () => modelState, refresh: refreshModelStatus, name: getModelName } };
 
 window.addEventListener('resize', () => {
   camera.aspect = container.clientWidth / container.clientHeight;
