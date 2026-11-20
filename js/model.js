@@ -105,3 +105,55 @@ export async function chatWithModel(agent, history) {
   if (!text) throw new Error('Ollama returned an empty reply');
   return text;
 }
+
+// ---------------------------------------------------------------------------
+// Real work: one-shot completions that produce an actual deliverable for a
+// task. These are NOT chat: the output is stored in the work record as the
+// task's result. If Ollama is unreachable or errors, this throws and the
+// task is marked failed with the real reason. Nothing is faked.
+// ---------------------------------------------------------------------------
+const TASK_PERSONAS = {
+  Olivia: 'You are Olivia, the manager of a small software office. You plan work and review results. For the task given, produce a clear, concrete plan or review: ordered steps, who should do each step, and a short definition of done. Be specific and concise. Do the work itself; do not describe what you would do.',
+  Leo: 'You are Leo, a researcher. For the task given, research and summarize using the material provided in the task plus well-established general knowledge. Give a tight summary with the key points. Never invent sources, quotes or statistics. Do the work itself; do not describe what you would do.',
+  Max: 'You are Max, a software developer. For the task given, write the actual code requested: complete and runnable, in a single code block, followed by at most three short lines explaining how it works. No placeholders, no TODOs. Do the work itself; do not describe what you would do.',
+  Mia: 'You are Mia, a designer and copywriter. For the task given, write the actual copy requested: polished and ready to use, with a headline and body where appropriate. Give one main version, not a menu of options. Do the work itself; do not describe what you would do.',
+  Sam: 'You are Sam, an office assistant who organizes information and drafts documents. For the task given, produce the organized result requested: a structured list, schedule, or clean draft. Be precise with names, dates and numbers given in the task. Do the work itself; do not describe what you would do.',
+};
+
+export function taskSystemPrompt(agentName, role) {
+  return TASK_PERSONAS[agentName]
+    || `You are ${agentName}, the ${(role || 'team member').toLowerCase()} in a small software office. Complete the task given and return the actual deliverable. Do the work itself; do not describe what you would do.`;
+}
+
+// Generic one-shot completion through Ollama. Throws on any failure.
+export async function completeWithModel(system, user, { numPredict = 700, temperature = 0.4, timeoutMs = 300000 } = {}) {
+  const name = getModelName();
+  const res = await fetchTimeout(`${OLLAMA_BASE}/api/chat`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      model: name,
+      stream: false,
+      think: false,
+      keep_alive: '10m',
+      options: { temperature, num_predict: numPredict, num_ctx: 2048 },
+      messages: [
+        { role: 'system', content: system },
+        { role: 'user', content: `${user} /no_think` },
+      ],
+    }),
+  }, timeoutMs);
+  if (!res.ok) throw new Error(`Ollama returned HTTP ${res.status} for model ${name}`);
+  const data = await res.json();
+  const text = ((data.message && data.message.content) || '')
+    .replace(/<think>[\s\S]*?<\/think>/gi, '')
+    .trim();
+  if (!text) throw new Error('Ollama returned an empty result');
+  return text;
+}
+
+// Run one task for one agent and return the real output text.
+export async function runTaskWithModel(agentName, role, task) {
+  const user = `Task: ${task.title}\n\nInstructions:\n${task.instructions || '(no further instructions)'}`;
+  return completeWithModel(taskSystemPrompt(agentName, role), user);
+}

@@ -4,6 +4,9 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>AI Agent Virtual Office</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=DM+Sans:opsz,wght@9..40,400;9..40,600;9..40,700;9..40,800&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="./styles.css">
 <script type="importmap">
 {
@@ -50,7 +53,7 @@
         <span class="stat-value" id="stat-progress">0%</span>
       </div>
       <div class="progress-track"><div class="progress-fill" id="progress-fill"></div></div>
-      <div class="project-name" id="stat-project">No project yet</div>
+      <div class="project-name" id="stat-project">No tasks yet</div>
 
       <div class="panel-title model-title">LOCAL MODEL</div>
       <div class="model-row">
@@ -68,11 +71,49 @@
       <ul id="activity-list"></ul>
     </aside>
 
-    <!-- RIGHT PANEL : event log -->
+    <!-- RIGHT PANEL : event log (real task events only) -->
     <aside id="right-panel" class="panel">
       <div class="panel-title">EVENT LOG</div>
       <ul id="event-log"></ul>
     </aside>
+
+    <!-- BOTTOM PANEL : real task board -->
+    <section id="task-panel" class="panel">
+      <div class="panel-title">TASK BOARD</div>
+      <form id="task-form">
+        <input id="task-title" type="text" placeholder="Task title" autocomplete="off" maxlength="120">
+        <textarea id="task-instructions" rows="2" placeholder="Instructions: what should the agent actually produce?"></textarea>
+        <div class="task-form-row">
+          <select id="task-assignee">
+            <option value="Auto">Auto (Olivia assigns)</option>
+            <option value="Olivia">Olivia · Manager</option>
+            <option value="Leo">Leo · Researcher</option>
+            <option value="Max">Max · Developer</option>
+            <option value="Mia">Mia · Designer</option>
+            <option value="Sam">Sam · Assistant</option>
+          </select>
+          <button id="task-create" type="submit">Create task</button>
+        </div>
+      </form>
+      <div id="task-offline" class="hidden"></div>
+      <ul id="task-list"></ul>
+    </section>
+
+    <!-- Task output modal -->
+    <div id="task-modal" class="hidden">
+      <div class="task-modal-card">
+        <div class="tm-header">
+          <span id="tm-title">Task</span>
+          <button id="tm-close" title="Close">✕</button>
+        </div>
+        <div id="tm-meta"></div>
+        <div class="tm-label">INSTRUCTIONS</div>
+        <div id="tm-instructions"></div>
+        <div class="tm-label">OUTPUT</div>
+        <div id="tm-error" class="hidden"></div>
+        <pre id="tm-output"></pre>
+      </div>
+    </div>
 
     <!-- Walk-in interaction prompt -->
     <div id="prompt" class="hidden"></div>

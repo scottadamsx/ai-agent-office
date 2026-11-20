@@ -106,24 +106,27 @@ export function createPerson(cfg) {
 // ---------------------------------------------------------------------------
 // Activities
 // ---------------------------------------------------------------------------
+// Idle animation only. These activities move the characters around the
+// office for visual life; they are NOT work and must never write to the
+// event log or the task stats. Real work happens only through js/tasks.js.
 const ACTIVITIES = [
-  { id: 'work', label: 'Working', phrase: 'Typing at their desk.', task: true, weight: 42, dur: [9, 16], anim: 'type',
+  { id: 'work', label: 'Working', weight: 42, dur: [9, 16], anim: 'type',
     spot: (a, o) => { const d = o.landmarks.desks[a.name]; return { pos: d.spot, node: d.node, face: d.face }; } },
-  { id: 'coffee', label: 'Getting coffee', phrase: 'Drinking a coffee.', weight: 12, dur: [5, 8], anim: 'drink',
+  { id: 'coffee', label: 'Getting coffee', weight: 12, dur: [5, 8], anim: 'drink',
     spot: (a, o) => ({ pos: o.landmarks.coffee, node: 'kitchen', face: -Math.PI / 2 }) },
-  { id: 'meeting', label: 'In a meeting', phrase: 'In a meeting.', task: true, weight: 10, dur: [8, 13], anim: 'stand',
+  { id: 'meeting', label: 'In a meeting', weight: 10, dur: [8, 13], anim: 'stand',
     spot: (a, o) => { const s = pick(o.landmarks.meetingSeats); return { pos: s, node: 'meeting', face: faceToward(s, { x: 11, z: 7 }) }; } },
-  { id: 'printer', label: 'Printing', phrase: 'Printing documents.', task: true, weight: 8, dur: [5, 7], anim: 'stand',
+  { id: 'printer', label: 'Printing', weight: 8, dur: [5, 7], anim: 'stand',
     spot: (a, o) => ({ pos: o.landmarks.printer, node: 'printer', face: Math.PI }) },
-  { id: 'foosball', label: 'Playing foosball', phrase: 'Playing foosball.', weight: 7, dur: [6, 9], anim: 'play',
+  { id: 'foosball', label: 'Playing foosball', weight: 7, dur: [6, 9], anim: 'play',
     spot: (a, o) => { const s = pick(o.landmarks.foosball); return { pos: s, node: 'gameS', face: faceToward(s, { x: 18, z: 2 }) }; } },
-  { id: 'pool', label: 'Playing pool', phrase: 'Playing pool.', weight: 5, dur: [6, 9], anim: 'play',
+  { id: 'pool', label: 'Playing pool', weight: 5, dur: [6, 9], anim: 'play',
     spot: (a, o) => ({ pos: o.landmarks.pool, node: 'gameS', face: faceToward(o.landmarks.pool, { x: 17.6, z: -4.2 }) }) },
-  { id: 'arcade', label: 'At the arcade', phrase: 'Playing an arcade game.', weight: 5, dur: [5, 8], anim: 'play',
+  { id: 'arcade', label: 'At the arcade', weight: 5, dur: [5, 8], anim: 'play',
     spot: (a, o) => ({ pos: o.landmarks.arcade, node: 'gameS', face: Math.PI / 2 }) },
-  { id: 'plants', label: 'Watering plants', phrase: 'Watering the plants.', weight: 5, dur: [5, 7], anim: 'stand',
+  { id: 'plants', label: 'Watering plants', weight: 5, dur: [5, 7], anim: 'stand',
     spot: (a, o) => { const i = Math.floor(Math.random() * o.landmarks.plants.length); return { pos: o.landmarks.plants[i], node: ['reception', 'openNE', 'lounge'][i], face: rand(0, Math.PI * 2) }; } },
-  { id: 'lounge', label: 'Relaxing', phrase: 'Relaxing in the lounge.', weight: 6, dur: [6, 10], anim: 'stand',
+  { id: 'lounge', label: 'Relaxing', weight: 6, dur: [6, 10], anim: 'stand',
     spot: (a, o) => { const s = pick(o.landmarks.loungeSpots); return { pos: s, node: 'lounge', face: faceToward(s, { x: -6, z: -9.5 }) }; } },
 ];
 const TOTAL_WEIGHT = ACTIVITIES.reduce((s, a) => s + a.weight, 0);
@@ -204,12 +207,10 @@ export class Agent {
     this.state = 'act';
     this.timer = rand(act.dur[0], act.dur[1]);
     this.setStatus(act.label);
-    this.hooks.log(`${this.name}: ${act.phrase}`);
-    if (act.task) this.hooks.taskStart(this);
+    // Visual only: idle animation never logs and never counts as a task.
   }
 
   finishActivity() {
-    if (this.activity?.task) this.hooks.taskDone(this);
     this.activity = null;
     this.state = 'idle';
     this.timer = rand(0.8, 2.6);
@@ -284,34 +285,6 @@ export const GREETINGS = {
   Max: "Oh, hey. Max, developer. Mind the code screens, that's my natural habitat.",
   Mia: "Hello! Mia, design. If it looks good around here, I probably had something to do with it.",
   Sam: "Hi hi! Sam, assistant. Coffee runs, calendars, chaos control. That's me.",
-};
-
-export const REPLIES = {
-  Olivia: [
-    "We're on track. Two tasks closed this morning and the Nova Dashboard is taking shape.",
-    "If you need anything, start with Sam, he knows where everything lives. Even the good pens.",
-    "Stand-up is at ten. Short, sharp, and nobody is allowed to say 'synergy'.",
-  ],
-  Leo: [
-    "I just read a fascinating paper on office plant productivity. The plants are winning.",
-    "My latest research says meetings could be emails. Groundbreaking, I know.",
-    "Give me a question and twenty minutes. I'll come back with charts.",
-  ],
-  Max: [
-    "I fixed a bug today that I created yesterday. Net progress: zero. Morale: high.",
-    "The build is green, the coffee is black, and the code is… mostly commented.",
-    "Have you tried turning it off and on again? Works on printers and Mondays.",
-  ],
-  Mia: [
-    "I'm redoing the dashboard palette. Forty shades of blue and one brave coral.",
-    "Kerning is just spacing with feelings. I have many feelings about spacing.",
-    "If the button doesn't spark joy, it doesn't ship. Those are the rules.",
-  ],
-  Sam: [
-    "I've restocked the snack drawer twice today. Twice. Heroes don't always wear capes.",
-    "Your calendar is clear, your coffee is hot, and the printer fears me. All is well.",
-    "I alphabetized the supply closet. Please clap.",
-  ],
 };
 
 // ---------------------------------------------------------------------------

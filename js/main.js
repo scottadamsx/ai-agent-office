@@ -1,7 +1,8 @@
 import * as THREE from 'three';
 import { buildOffice } from './office.js';
-import { Agent, AGENT_CONFIGS, GREETINGS, REPLIES, addBackgroundPeople, updateBackground } from './agents.js';
+import { Agent, AGENT_CONFIGS, GREETINGS, addBackgroundPeople, updateBackground } from './agents.js';
 import { getModelName, setModelName, checkModel, chatWithModel } from './model.js';
+import { createTask, listTasks, listEvents, taskCounts, onTasksChange, setTaskHooks } from './tasks.js';
 
 // ---------------------------------------------------------------- renderer
 const container = document.getElementById('scene-container');
@@ -37,30 +38,48 @@ addBackgroundPeople(scene);
 const $ = id => document.getElementById(id);
 const logEl = $('event-log');
 const now = () => new Date().toLocaleTimeString('en-GB', { hour12: false });
+const fmtTs = ts => new Date(ts).toLocaleTimeString('en-GB', { hour12: false });
 
-function addLog(text) {
-  const li = document.createElement('li');
-  const ts = document.createElement('span');
-  ts.className = 'ts'; ts.textContent = now();
-  li.appendChild(ts);
-  li.appendChild(document.createTextNode(text));
-  logEl.appendChild(li);
-  while (logEl.children.length > 90) logEl.removeChild(logEl.firstChild);
+// ---------------------------------------------------------------- event log
+// The log renders ONLY real task events from the persistent work record:
+// task created, started, completed (with a summary from the actual output),
+// and failed (with the real reason). Idle animation never writes here.
+function renderLog() {
+  const evts = listEvents().slice(-90);
+  logEl.innerHTML = '';
+  if (!evts.length) {
+    const li = document.createElement('li');
+    li.className = 'log-empty';
+    li.textContent = 'No task events yet. Create a task on the board and it will be recorded here.';
+    logEl.appendChild(li);
+    return;
+  }
+  for (const ev of evts) {
+    const li = document.createElement('li');
+    li.className = 'log-' + ev.type;
+    const ts = document.createElement('span');
+    ts.className = 'ts'; ts.textContent = fmtTs(ev.ts);
+    li.appendChild(ts);
+    li.appendChild(document.createTextNode(ev.text));
+    logEl.appendChild(li);
+  }
   logEl.scrollTop = logEl.scrollHeight;
 }
 
-// stats state
-let completedTasks = 0;
-const runningBy = new Set();
-const PROJECT_GOAL = 20;
+// ---------------------------------------------------------------- stats
+// Every count comes from the real work record, never from animation.
 function refreshStats() {
   const active = agents.filter(a => a.isActive() || a.paused).length;
-  $('stat-active').textContent = `${active}/15`;
-  $('stat-running').textContent = String(runningBy.size);
-  $('stat-completed').textContent = String(completedTasks);
-  const pct = Math.min(100, Math.round((completedTasks / PROJECT_GOAL) * 100));
+  $('stat-active').textContent = `${active}/${agents.length}`;
+  const c = taskCounts();
+  $('stat-running').textContent = String(c.running);
+  $('stat-completed').textContent = String(c.done);
+  const pct = c.total ? Math.round((c.done / c.total) * 100) : 0;
   $('stat-progress').textContent = `${pct}%`;
   $('progress-fill').style.width = `${pct}%`;
+  $('stat-project').textContent = c.total
+    ? `Work record: ${c.total} task${c.total === 1 ? '' : 's'} · ${c.failed} failed`
+    : 'No tasks yet';
 }
 
 const activityList = $('activity-list');
@@ -84,25 +103,97 @@ function renderActivity() {
 }
 
 const hooks = {
-  log: addLog,
   status: () => { renderActivity(); refreshStats(); },
-  taskStart: a => {
-    runningBy.add(a.name);
-    if (completedTasks === 0 && runningBy.size === 1) $('stat-project').textContent = 'Project: Nova Dashboard';
-    refreshStats();
-  },
-  taskDone: a => {
-    runningBy.delete(a.name);
-    completedTasks++;
-    addLog(`${a.name} completed a task.`);
-    refreshStats();
-  },
 };
 
 const agents = AGENT_CONFIGS.map(cfg => new Agent(scene, office, cfg, hooks));
+
+// ---------------------------------------------------------------- task board
+const taskListEl = $('task-list');
+const STATUS_LABEL = { queued: 'Queued', running: 'Running', done: 'Done', failed: 'Failed' };
+
+function renderTasks() {
+  const items = listTasks();
+  taskListEl.innerHTML = '';
+  if (!items.length) {
+    const li = document.createElement('li');
+    li.className = 'task-empty';
+    li.textContent = 'No tasks yet. Create one above and an agent will do it for real, through the local model.';
+    taskListEl.appendChild(li);
+    return;
+  }
+  for (const t of items) {
+    const li = document.createElement('li');
+    li.className = 'task-item';
+    const chip = document.createElement('span');
+    chip.className = 'chip ' + t.status;
+    chip.textContent = STATUS_LABEL[t.status] || t.status;
+    const main = document.createElement('span');
+    main.className = 'task-main';
+    const title = document.createElement('b');
+    title.textContent = t.title;
+    const meta = document.createElement('span');
+    meta.className = 'task-meta';
+    meta.textContent = `${t.agent || t.assignee} · ${t.model} · ${new Date(t.createdAt).toLocaleString('en-GB')}`;
+    main.append(title, meta);
+    li.append(chip, main);
+    li.addEventListener('click', () => openTask(t.id));
+    taskListEl.appendChild(li);
+  }
+}
+
+let openTaskId = null;
+function openTask(id) { openTaskId = id; renderTaskModal(); $('task-modal').classList.remove('hidden'); }
+function closeTaskModal() { openTaskId = null; $('task-modal').classList.add('hidden'); }
+function renderTaskModal() {
+  if (!openTaskId) return;
+  const t = listTasks().find(x => x.id === openTaskId);
+  if (!t) { closeTaskModal(); return; }
+  $('tm-title').textContent = t.title;
+  $('tm-meta').textContent = [
+    `Status: ${STATUS_LABEL[t.status] || t.status}`,
+    `Agent: ${t.agent || t.assignee}`,
+    `Model: ${t.model}`,
+    `Created: ${new Date(t.createdAt).toLocaleString('en-GB')}`,
+    t.startedAt ? `Started: ${new Date(t.startedAt).toLocaleString('en-GB')}` : null,
+    t.finishedAt ? `Finished: ${new Date(t.finishedAt).toLocaleString('en-GB')}` : null,
+  ].filter(Boolean).join('  ·  ');
+  $('tm-instructions').textContent = t.instructions || '(no instructions)';
+  $('tm-output').textContent = t.status === 'failed' ? '' : (t.output || '(no output yet)');
+  const err = $('tm-error');
+  if (t.status === 'failed') { err.textContent = `Failed: ${t.error}`; err.classList.remove('hidden'); }
+  else err.classList.add('hidden');
+}
+$('tm-close').addEventListener('click', closeTaskModal);
+$('task-modal').addEventListener('click', e => { if (e.target === $('task-modal')) closeTaskModal(); });
+
+$('task-form').addEventListener('submit', e => {
+  e.preventDefault();
+  const title = $('task-title').value.trim();
+  if (!title) { $('task-title').focus(); return; }
+  createTask({ title, instructions: $('task-instructions').value, assignee: $('task-assignee').value });
+  $('task-title').value = '';
+  $('task-instructions').value = '';
+});
+
+// While a task runs, pin its agent visually: the activity list shows the real
+// task title and wandering pauses. Display only; log entries come from tasks.js.
+setTaskHooks({
+  onRunStart: (name, task) => {
+    const a = agents.find(x => x.name === name);
+    if (a) { a.paused = true; a.setStatus(`Working on: ${task.title}`); }
+  },
+  onRunEnd: name => {
+    const a = agents.find(x => x.name === name);
+    if (a) { a.paused = false; a.setStatus('Idle'); }
+  },
+});
+
+onTasksChange(() => { renderLog(); renderTasks(); renderTaskModal(); refreshStats(); });
+renderLog();
+renderTasks();
 renderActivity();
 refreshStats();
-addLog('The office is open. Agents are settling in.');
 setInterval(() => { $('clock').textContent = now(); }, 500);
 $('clock').textContent = now();
 
@@ -242,10 +333,10 @@ function updateChatNote() {
     note.classList.add('hidden');
     note.textContent = '';
   } else if (modelState === 'not-pulled') {
-    note.textContent = `Offline scripted mode: ${getModelName()} is not pulled in Ollama, so ${chatAgent ? chatAgent.name : 'the agent'} is using scripted replies. Pull it with: ollama pull ${getModelName()}`;
+    note.textContent = `Local model offline: ${getModelName()} is not pulled in Ollama, so chat and tasks cannot run. Pull it with: ollama pull ${getModelName()}`;
     note.classList.remove('hidden');
   } else {
-    note.textContent = `Offline scripted mode: Ollama is not reachable at localhost:11434, so ${chatAgent ? chatAgent.name : 'the agent'} is using scripted replies.`;
+    note.textContent = 'Local model offline: Ollama is not reachable at localhost:11434, so chat and tasks cannot run. Nothing is simulated in the meantime.';
     note.classList.remove('hidden');
   }
 }
@@ -258,6 +349,16 @@ async function refreshModelStatus() {
   $('model-status').textContent = MODEL_STATUS_TEXT[state] || state;
   const dot = $('model-dot');
   dot.className = 'model-dot ' + state;
+  const banner = $('task-offline');
+  if (banner) {
+    if (state === 'ready') banner.classList.add('hidden');
+    else {
+      banner.textContent = state === 'not-pulled'
+        ? `Model not pulled: tasks will fail until ${name} is available in Ollama (ollama pull ${name}).`
+        : 'Model offline: Ollama is not reachable at localhost:11434. Tasks created now will fail with that reason, and the failure will be recorded in the log.';
+      banner.classList.remove('hidden');
+    }
+  }
   updateChatNote();
   return state;
 }
@@ -280,8 +381,6 @@ setInterval(refreshModelStatus, 15000);
 // ---------------------------------------------------------------- chat
 let chatAgent = null;
 let nearestAgent = null;
-const replyIdx = {};
-const chatLogged = new Set();
 const chatHistory = {}; // agent name -> [{role, content}] for the local model
 
 function chatMsg(text, who) {
@@ -314,13 +413,12 @@ function closeChat() {
   chatAgent = null;
   $('chat-panel').classList.add('hidden');
 }
-function scriptedReply(agent, hist) {
-  const idx = (replyIdx[agent.name] = (replyIdx[agent.name] || 0) + 1);
-  const line = REPLIES[agent.name][(idx - 1) % REPLIES[agent.name].length];
-  setTimeout(() => {
-    hist.push({ role: 'assistant', content: line });
-    if (chatAgent === agent) chatMsg(line, 'them');
-  }, 750);
+function chatSys(text) {
+  const d = document.createElement('div');
+  d.className = 'msg sys';
+  d.textContent = text;
+  $('chat-messages').appendChild(d);
+  $('chat-messages').scrollTop = $('chat-messages').scrollHeight;
 }
 
 async function sendChat() {
@@ -330,11 +428,14 @@ async function sendChat() {
   chatMsg(text, 'me');
   input.value = '';
   const agent = chatAgent;
-  if (!chatLogged.has(agent.name)) { addLog(`Chatting with ${agent.name}.`); chatLogged.add(agent.name); }
   const hist = (chatHistory[agent.name] = chatHistory[agent.name] || []);
   hist.push({ role: 'user', content: text });
 
-  if (modelState !== 'ready') { scriptedReply(agent, hist); return; }
+  if (modelState !== 'ready') {
+    // Honest offline behaviour: no scripted replies pretending to be the agent.
+    chatSys(`The local model is offline, so ${agent.name} cannot reply right now. Start Ollama on this machine to chat for real.`);
+    return;
+  }
 
   const typing = chatMsg(`${agent.name} is typing`, 'them typing');
   try {
@@ -343,11 +444,10 @@ async function sendChat() {
     hist.push({ role: 'assistant', content: reply });
     if (chatAgent === agent) chatMsg(reply, 'them');
   } catch (err) {
-    // Ollama went away mid-chat: fall back to scripted replies, honestly.
     typing.remove();
-    console.warn('Local model chat failed, using scripted reply:', err);
+    console.warn('Local model chat failed:', err);
     refreshModelStatus();
-    scriptedReply(agent, hist);
+    if (chatAgent === agent) chatSys(`The local model stopped responding, so ${agent.name} cannot reply right now. Nothing was simulated.`);
   }
 }
 $('chat-send').addEventListener('click', sendChat);
@@ -397,7 +497,8 @@ tick();
 
 // small handle for automated QA / debugging
 window.__app = { agents, player, setMode, openChat, scene,
-  model: { state: () => modelState, refresh: refreshModelStatus, name: getModelName } };
+  model: { state: () => modelState, refresh: refreshModelStatus, name: getModelName },
+  tasks: { create: createTask, list: listTasks, events: listEvents, counts: taskCounts } };
 
 window.addEventListener('resize', () => {
   camera.aspect = container.clientWidth / container.clientHeight;
